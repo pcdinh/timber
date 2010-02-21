@@ -1,0 +1,74 @@
+#!/usr/bin/env php
+<?php
+
+define('BASEDIR',dirname(__FILE__));
+
+// set an include path
+set_include_path(implode(PATH_SEPARATOR, array(
+	BASEDIR.'/lib',
+	BASEDIR.'/classes',
+	)));
+
+// dead simple autoloader
+function __autoload($classname)
+{
+	require_once str_replace('_','/',$classname) . '.php';
+}
+
+// show help
+if(in_array('-h', $argv) || in_array('--help', $argv))
+{
+	echo "\nusage: $argv[0] [-v] [-d] [-l 0.0.0.0] [-p 11124] [..options]\n\n";
+	echo " -v        : verbose, shows more chatter\n";
+	echo " -d        : runs as a daemon, otherwise runs in the foreground\n";
+	echo " -l host   : set the address to listen on\n";
+	echo " -p port   : sets the port to listen on\n";
+	echo " --file f  : writes messages to flat file f\n";
+	echo " --db dsn  : writes messages to a database backend\n";
+	echo " --console : writes messages to the console\n";
+	echo "\n";
+	exit(1);
+}
+
+// creates a pair of sockets and fork
+$sockets = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+$pid = pcntl_fork();
+
+if ($pid == -1)
+{
+	die('could not fork');
+}
+// the parent process
+else if ($pid)
+{
+	/* parent */
+	fclose($sockets[0]);
+
+	// start the socket server up
+	$server = new Timber_Server();
+
+	// connect the relaying sockets
+	$server->relay($sockets[1]);
+
+	// start the server
+	$server->run();
+
+	fclose($sockets[1]);
+}
+// the child process
+else
+{
+	/* child */
+	fclose($sockets[1]);
+
+	while($line = fread($sockets[0],1024))
+	{
+		printf(" (relay) >> %s \n", rtrim($line,"\n"));
+		fwrite($sockets[0], "OK");
+	}
+
+	fclose($sockets[0]);
+}
+
+
+
