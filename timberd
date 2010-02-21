@@ -25,50 +25,60 @@ if(in_array('-h', $argv) || in_array('--help', $argv))
 	echo " -p port   : sets the port to listen on\n";
 	echo " --file f  : writes messages to flat file f\n";
 	echo " --db dsn  : writes messages to a database backend\n";
-	echo " --console : writes messages to the console\n";
 	echo "\n";
 	exit(1);
 }
 
-// creates a pair of sockets and fork
-$sockets = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
-$pid = pcntl_fork();
+$args = array(
+	'verbose' => in_array('-v',$argv),
+	'daemon' => in_array('-d',$argv),
+	'listen' => '0.0.0.0',
+	'port' => 11124,
+	);
 
-if ($pid == -1)
+$files = array();
+$databases = array();
+
+// parse arguments
+foreach($argv as $idx=>$arg)
 {
-	die('could not fork');
+	if($arg == '-l') $args['listen'] = $argv[$idx+1];
+	if($arg == '-p') $args['port'] = $argv[$idx+1];
+	if($arg == '--file') $files[] = $argv[$idx+1];
+	if($arg == '--db') $databases[] = $argv[$idx+1];
 }
-// the parent process
-else if ($pid)
+
+$clients = array();
+
+// process file clients first
+foreach($files as $file)
 {
-	/* parent */
-	fclose($sockets[0]);
-
-	// start the socket server up
-	$server = new Timber_Server();
-
-	// connect the relaying sockets
-	$server->relay($sockets[1]);
-
-	// start the server
-	$server->run();
-
-	fclose($sockets[1]);
+	// create a pair of unix sockets
+	$sockets = stream_socket_pair(STREAM_PF_UNIX, STREAM_SOCK_STREAM, STREAM_IPPROTO_IP);
+	$clients[] = array(new Timber_FileClient($file, $sockets[0]), $sockets);
 }
-// the child process
-else
-{
-	/* child */
-	fclose($sockets[1]);
 
-	while($line = fread($sockets[0],1024))
+// initialize the socket server
+$server = new Timber_Server($args['listen'], $args['port']);
+
+// fork a child for each client
+foreach($clients as $client)
+{
+	if(pcntl_fork() == 0)
 	{
-		printf(" (relay) >> %s \n", rtrim($line,"\n"));
-		fwrite($sockets[0], "OK");
+		// close the client side of the socket
+		unset($client[1][1]);
+		$client[0]->loop();
+		exit(0);
 	}
-
-	fclose($sockets[0]);
+	else
+	{
+		// close the client side of the socket
+		unset($client[1][0]);
+		$server->addRelaySocket($sockets[1]);
+	}
 }
 
-
+// start the server
+$server->run();
 

@@ -1,80 +1,92 @@
 <?php
 
 /**
- * A connection buffer
+ * Represents a connection in the Timber_Server
  */
 class Timber_Connection
 {
-	const READ_BUFFER='read';
-	const WRITE_BUFFER='write';
-
-	private $_buffer=array('read'=>'', 'write'=>'');
+	private $_readBuffer, $_writeBuffer, $_parser, $_command;
 
 	/**
-	 * Saves data in a buffer, either read or write
-	 * @param string $buffer The buffer to read, either read or write
+	 * Constructor
 	 */
-	public function write( $data, $buffer='read' )
+	public function __construct()
 	{
-		$this->_buffer[$buffer] .= $data;
+		$this->_readBuffer = new Timber_Buffer();
+		$this->_writeBuffer = new Timber_Buffer();
+		$this->_parser = new Timber_Parser();
 	}
 
 	/**
-	 * Returns the first line terminated with \n found in the buffer, or FALSE
+	 * Reads $bytes in to the connection's buffers from a stream
 	 */
-	public function readLine( $buffer='read' )
+	public function read($stream, $bytes)
 	{
-		if(!$this->hasLine($buffer)) return false;
-
-		$idx = strpos($this->_buffer[$buffer],"\n");
-		$line = substr($this->_buffer[$buffer],0,$idx);
-		$this->_buffer[$buffer] = substr($this->_buffer[$buffer],$idx+1);
-		return rtrim($line,"\n");
+		$this->_readBuffer->write($stream->read($bytes));
 	}
 
 	/**
-	 * Returns the first line terminated with \n found in the buffer, without
-	 * removing it from the buffer.
+	 * Writes from the connections buffers to the stream
+	 * @return int the number of bytes remaining to write
 	 */
-	public function peekLine( $buffer='read' )
+	public function write($stream)
 	{
-		if(!$this->hasLine($buffer)) return false;
-
-		$idx = strpos($this->_buffer[$buffer],"\n");
-		return rtrim(substr($this->_buffer[$buffer],0,$idx),"\n");
+		$stream->write($this->_writeBuffer->read());
+		return $this->_writeBuffer->length();
 	}
 
 	/**
-	* Whether a buffer has a line in in it (terminated by a \n)
-	* @param string $buffer The buffer to read
-	* @return bool
-	*/
-	public function hasLine( $buffer='read' )
+	 * Returns a command from the read buffer
+	 */
+	public function getCommand()
 	{
-		return strpos($this->_buffer[$buffer],"\n") !== false;
+		// if no command exists, look for one
+		if(!isset($this->_command) && $line = $this->_readBuffer->readLine())
+		{
+			$this->_command = $this->_parser->parse($line);
+		}
+
+		// check if we can read a payload
+		if(isset($this->_command) && $this->_command->payloadsize != false)
+		{
+			if($payload = $this->_readBuffer->read($this->_command->payloadsize, true))
+			{
+				$this->_command->payload = json_decode($payload);
+			}
+		}
+
+		// try and return a command
+		if(isset($this->_command) && (!$this->_command->payloadsize || $this->_command->payload))
+		{
+			$command = $this->_command;
+			unset($this->_command);
+			return $command;
+		}
 	}
 
 	/**
-	* Whether a buffer has a certain number of bytes in it
-	* @param string $buffer The buffer to read
-	* @param int $size The number of bytes
-	* @return bool
-	*/
-	public function has( $size, $buffer='read' )
+	 * Returns an OK response
+	 */
+	public function ok($bytes)
 	{
-		return strlen($this->_buffer[$buffer]) >= $size;
+		$this->_writeBuffer->write(sprintf("OK %d\n", $bytes));
 	}
 
 	/**
-	* Read a chunk of data from a write buffer
-	* @param string $buffer The buffer to read, either read or write
-	* @param int $size The amount of data to read
-	* @return string
-	*/
-	public function read( $size=4096, $buffer='read' )
+	 * Relays a command to the connection
+	 */
+	public function relay($command)
 	{
-		$data = substr( $this->_buffer[$buffer], 0, $size );
-		$this->_buffer[$buffer] = substr( $this->_buffer[$buffer], $size );
-		return $data;
+		// TODO: better strategy for serializing commands
+		$string = sprintf("%s %s %s %s %d",
+			$command->level,
+			$command->host,
+			$command->application,
+			$command->subsystem,
+			$command->payloadsize
+			);
+
+		$this->_writeBuffer->write("$string\n");
+		$this->_writeBuffer->write(json_encode($command->payload)."\n");
 	}
 }

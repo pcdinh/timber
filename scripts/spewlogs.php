@@ -9,7 +9,7 @@ if(!$sock = @fsockopen("127.0.0.1", 11124, $errno, $errstr))
 
 $payload = array(
 	'level' => 'INFO',
-	'message' => 'The height of a full-grown, full-size llama is between 1.7 meters and 1.8 meters tall.',
+	'message' => "The height of a full-grown\n, full-size llama is between 1.7 meters and 1.8 meters tall.",
 	'timestamp' => time(),
 	);
 

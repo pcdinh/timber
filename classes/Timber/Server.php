@@ -31,9 +31,6 @@ class Timber_Server
 			$this->_factory->createServerStream( $listen.':'.$port ),
 			MioSelectionKey::OP_ACCEPT
 		);
-
-		// Create a protocol parser
-		$this->_parser = new Timber_Protocol();
 	}
 
 	/**
@@ -73,37 +70,29 @@ class Timber_Server
 					}
 					elseif( $key->isReadable() )
 					{
-						$data = $key->stream->read( 4096 );
-						$this->_verbose("<< %s", rtrim($data,"\n"));
-
-						$key->attachment->write($data, Timber_Connection::READ_BUFFER);
+						$connection = $key->attachment;
+						$connection->read($key->stream, 25);
 
 						// check for a command to execute
-						if($command = $this->_parser->readCommand($key->attachment))
+						if($command = $connection->getCommand())
 						{
-							$this->_verbose("got a %s command", $command[0]->command);
-							$key->attachment->write("OK\n", Timber_Connection::WRITE_BUFFER);
+							$this->_verbose("got a command: %s", $command->name);
+							$connection->ok($command->payloadsize);
 							$key->setInterestOps( MioSelectionKey::OP_WRITE );
 
-							var_dump($this->_selector->selection_keys);
-
-							/* write to all relays
-							foreach($this->_relays as $relay)
-							{
-								$this->_verbose("relaying %s command", $command[0]->command);
-								$relay[1]->write("LLAMA\n", Timber_Connection::WRITE_BUFFER);
-							}
-							*/
+							// defer to relays
+							$this->_relayCommand($command);
 						}
 					}
 					elseif( $key->isWritable() )
 					{
-						if($data = $key->attachment->read(4096, Timber_Connection::WRITE_BUFFER))
-						{
-							$this->_verbose(">> %s", rtrim($data,"\n"));
-							$key->stream->write($data);
-							$key->setInterestOps( MioSelectionKey::OP_READ );
-						}
+						$connection = $key->attachment;
+						$remaining = $connection->write($key->stream);
+
+						$key->setInterestOps( $remaining
+							? MioSelectionKey::OP_WRITE
+							: MioSelectionKey::OP_READ
+							);
 					}
 				}
 				catch(MioClosedException $e)
@@ -120,21 +109,41 @@ class Timber_Server
 		}
 	}
 
+	private function _relayCommand($command)
+	{
+		foreach($this->_relays as $idx=>$stream)
+		{
+			if(!$stream->isOpen())
+			{
+				$this->_console("relay %s is closed, removing", $stream);
+				unset($this->_relays[$idx]);
+			}
+			else
+			{
+				if($command->name == Timber_Parser::COMMAND_LOG)
+				{
+					$key = $this->_selector->keyFor($stream);
+					$key->attachment->relay($command);
+					$key->setInterestOps( MioSelectionKey::OP_WRITE );
+				}
+			}
+		}
+	}
+
 	/**
 	 * Adds a socket to relay log commands to
 	 */
-	public function relay($socket)
+	public function addRelaySocket($socket)
 	{
-		$stream = new MioStream($socket,"relay");
-		$connection = new Timber_Connection();
-		$this->_relays[] = array($stream, $connection);
+		$stream = new MioStream($socket, "relay-socket".intval($socket));
+		$this->_relays[] = $stream;
 
 		$this->_console("adding a socket for relaying");
 
 		$this->_selector->register(
 			$stream,
 			MioSelectionKey::OP_WRITE,
-			$connection
+			new Timber_Connection()
 			);
 	}
 

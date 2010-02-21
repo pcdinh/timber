@@ -2,7 +2,10 @@
 Timber
 ======
 
-The timber logging server is a simple, fast application logging server written in PHP5, with no external dependancies. It's designed to receive log messages as quickly as possible and then asynchronously either write them locally or relay them to a remote timber instance for aggregation.
+The timber logging server is a simple, fast application logging server written
+in PHP5, with no external dependancies. It's designed to receive log messages as
+quickly as possible and then asynchronously either write them locally or relay
+them to a remote timber instance for aggregation.
 
 Running it
 ----------
@@ -16,15 +19,22 @@ Architecture
 
 The timberd server uses two processes, a reader process and a writer process.
 
-The reader process listens to the inbound TCP connections for log messages, which it passes to the writer process for processing. This process is entirely asynchronous and is designed to receive high volumes of log messages.
+The reader process listens to the inbound TCP connections for log messages, which
+it passes to the writer process for processing. This process is entirely asynchronous
+and is designed to receive high volumes of log messages.
 
-The writer process accepts inbound log messages and either writes them to a local database or relays them to a remote timberd server for aggregation. Initially the messages will be queued in memory, but more advanced techniques
-like disk buffering or integration with a queue like [beanstalkd][3] are possible.
+The writer process accepts inbound log messages and either writes them to a local
+database or relays them to a remote timberd server for aggregation. Initially the
+messages will be queued in memory, but more advanced techniques like disk buffering
+or integration with a queue like [beanstalkd][3] are possible.
 
 Security
 --------
 
-Messages are passing clear text and there is no authentication at a socket layer. Security could later be added through signing and encryption of log payloads. Additionally, network level security should be used to ensure timberd instances are not publically accessible.
+Messages are passing clear text and there is no authentication at a socket layer.
+Security could later be added through signing and encryption of log payloads.
+Additionally, network level security should be used to ensure timberd instances
+are not publically accessible.
 
 Protocol
 --------
@@ -33,29 +43,40 @@ The protocol is fairly simple and largely inspired by the [memcached protocol][1
 
 The primary type of message is a logging message:
 
-	<level> <host> <application> <subsystem> <level> <bytes>\n
-	... data payload follows\n
+	>> <level> <host> <application> <subsystem> <level> <bytes>\n
+	>> ... data payload follows\n
 
-The host, application and subsystem are send to the server to identify where the log message is coming from. For instance:
+The host, application and subsystem are send to the server to identify where the
+log message is coming from. For instance:
 
 	INFO example.org demoapplication commerce 8094\n
 	... 8094 bytes of data payload follows\n
 
-The var bytes is used to describe how long the log payload that follows is in bytes. All lines are terminated with a bare newline.
+The var bytes is used to describe how long the log payload that follows is in bytes.
+All lines are terminated with a bare newline.
 
-Additionally, gzip compression can be used on the payloads. This is indicated with a gzip token at the end of the command:
+Additionally, gzip compression can be used on the payloads. This is indicated with
+a gzip token at the end of the command:
 
 	TRACE example.org myapp myservice 100002 gzip\n
 	... 100002 bytes of gzipped payload follows\n
+
+In all cases, the server will respond with:
+
+	OK <payloadbytes>
 
 Messages
 --------
 
 Log messages are broken into different priority levels:
 
-TRACE is the lowest level of message and is essentially debugging messages, INFO is for informational messages, WARN is for non-fatal warnings, ERROR is for recoverable errors and FATAL is for non-recoverable errors.
+TRACE is the lowest level of message and is essentially debugging messages, INFO
+is for informational messages, WARN is for non-fatal warnings, ERROR is for
+recoverable errors and FATAL is for non-recoverable errors.
 
-A message is composed of a timestamp, a message and then optionally a stacktrace and a series of application specific context items, for instance things like memory usage, the script that the log message came from, etc.
+A message is composed of a timestamp, a message and then optionally a stacktrace
+and a series of application specific context items, for instance things like
+memory usage, the script that the log message came from, etc.
 
 The payload is [json][2] encoded and follows a defined structure:
 
@@ -67,7 +88,8 @@ The payload is [json][2] encoded and follows a defined structure:
 		context: ... optional, see context format
 	}
 
-The stacktrace key can be ommitted, but if provided should describe the calling stack before the log message in the application in the following structure:
+The stacktrace key can be ommitted, but if provided should describe the calling stack
+before the log message in the application in the following structure:
 
 	[
 		{
